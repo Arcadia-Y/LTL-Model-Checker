@@ -456,26 +456,24 @@ pub fn gnba_to_nba<A: Clone>(gnba: &GNBA<A>) -> NBA<A> {
     let state_num = gnba.state_num * k;
     // NBA accepting states are (q, 0) where q is in F_0 of GNBA.
     // Here, it means states with index q (from 0 to n-1) if q is in gnba.accept[0].
-    let accept: HashSet<usize> = gnba.accept[0].clone();
+    let accept = gnba.accept[0].clone();
 
-    let mut transition = vec!(); // Transitions for NBA states (q_nba = q_gnba + j * n)
-    for j_counter in 0..k { // For each counter value j
-        let fj = &gnba.accept[j_counter]; // Current acceptance set F_j to check
-        for i_gnba_state in 0..n { // For each GNBA state i
-            let ts_func_gnba = &gnba.transition[i_gnba_state]; // Transitions from GNBA state i
-            let mut nba_transitions_from_current_state = vec!();
-            for (alpha, next_gnba_states) in ts_func_gnba {
-                let dest_nba_states: Vec<usize>;
-                if fj.contains(&i_gnba_state) { // If GNBA state i is in F_j
-                    // Transition to (q', (j+1)%k)
-                    dest_nba_states = next_gnba_states.iter().map(|q_prime: &usize| *q_prime + ((j_counter + 1) % k) * n).collect();
-                } else { // If GNBA state i is NOT in F_j
-                    // Transition to (q', j)
-                    dest_nba_states = next_gnba_states.iter().map(|q_prime: &usize| *q_prime + j_counter * n).collect();
+    let mut transition = vec!();
+    for j in 0..k {
+        let fj = &gnba.accept[j];
+        for i in 0..n {
+            let ts_func = &gnba.transition[i];
+            let mut res = vec!();
+            for (a, ts) in ts_func {
+                let dest: Vec<usize>;
+                if fj.contains(&i) {
+                    dest = ts.iter().map(|x: &usize| *x + (j+1) % k * n).collect();
+                } else {
+                    dest = ts.iter().map(|x: &usize| *x + j * n).collect();
                 }
-                nba_transitions_from_current_state.push((alpha.clone(), dest_nba_states));
+                res.push((a.clone(), dest));
             }
-            transition.push(nba_transitions_from_current_state); // Add transitions for NBA state (i_gnba_state, j_counter)
+            transition.push(res);
         }
     }
 
@@ -536,17 +534,15 @@ pub fn ts_nba_prod<A: PartialEq>(ts: &TS<A>, nba: &NBA<A>) -> TS<usize> {
     let state_num = sn * qn;
 
     let mut transition = vec![Vec::new(); state_num];
-    for s_ts in 0..sn { // For each state s in TS
-        for t_ts_next_state in &ts.transition[s_ts] { // For each successor t of s in TS
-            let labels_at_t_ts = &ts.prop[*t_ts_next_state]; // L(t)
-            for q_nba_current in 0..qn { // For each state q in NBA
-                // Check NBA transitions from q_nba_current on L(t_ts_next_state)
-                nba.transition[q_nba_current].iter()
-                    .filter(|(alpha, _)| alpha == labels_at_t_ts) // If NBA transition label matches L(t)
-                    .for_each(|(_, nba_next_states_p)| {
-                        for p_nba_next in nba_next_states_p {
-                            // Add transition from (s_ts, q_nba_current) to (t_ts_next_state, p_nba_next)
-                            transition[pair(s_ts, q_nba_current)].push(pair(*t_ts_next_state, *p_nba_next));
+    for s in 0..sn {
+        for t in &ts.transition[s] {
+            let lt = &ts.prop[*t];
+            for q in 0..qn {
+                nba.transition[q].iter()
+                    .filter(|(a, _)| a == lt)
+                    .for_each(|(_, ps)| {
+                        for p in ps {
+                            transition[pair(s, q)].push(pair(*t, *p));
                         }
                     });
             }
@@ -554,26 +550,25 @@ pub fn ts_nba_prod<A: PartialEq>(ts: &TS<A>, nba: &NBA<A>) -> TS<usize> {
     }
 
     let mut initial = Vec::new();
-    for s_ts_initial in &*ts.initial { // For each initial state s0 of TS
-        let labels_at_s_ts_initial = &ts.prop[*s_ts_initial]; // L(s0)
-        let mut q_nba_reachable_from_initial = HashSet::new();
-        // Find NBA states q' reachable from NBA initial states q_init via L(s0)
-        for q_nba_initial in &nba.initial { // For each initial state q_init of NBA
-            nba.transition[*q_nba_initial].iter()
-                .filter(|(alpha, _)| alpha == labels_at_s_ts_initial)
-                .for_each(|(_, next_nba_states_q_prime)| q_nba_reachable_from_initial.extend(next_nba_states_q_prime));
+    for s in &*ts.initial {
+        let ls = &ts.prop[*s];
+        let mut qset = HashSet::new();
+        for i in &nba.initial {
+            nba.transition[*i].iter()
+                .filter(|(a, _)| a == ls)
+                .for_each(|(_, qs)| qset.extend(qs));
         }
-        for q_nba_target in q_nba_reachable_from_initial {
-            initial.push(pair(*s_ts_initial, q_nba_target));
+        for q in qset {
+            initial.push(pair(*s, q));
         }
     }
 
     // The 'prop' of the product state (s,q) is q itself.
     // This is used by NDFS to check against nba.accept.
     let mut prop = Vec::with_capacity(state_num);
-    for _s_ts in 0..sn {
-        for q_nba in 0..qn {
-            prop.push(q_nba);
+    for _ in 0..sn {
+        for q in 0..qn {
+            prop.push(q);
         }
     }
     
@@ -603,7 +598,7 @@ NDFS is an algorithm for detecting accepting cycles in a Büchi automaton (here,
 
 // data structures for nested DFS
 pub struct NDFS<'a> {
-    ts: &'a TS<usize>, // Product TS, where prop[state_idx] is the NBA state component
+    ts: &'a TS<usize>,
     accept: &'a HashSet<usize>, // NBA accepting states
     outer_visited: Vec<bool>,
     inner_visited: Vec<bool>,
@@ -624,69 +619,63 @@ impl<'a> NDFS<'a> {
 
 ### `run` and DFS methods: Cycle Detection
 
-The `run` method initiates the NDFS.
-1.  The first DFS (`reachable_cycle`) explores the graph.
-2.  When the first DFS finishes processing a state `s` (i.e., after visiting all its successors), if `s` is an accepting state (i.e., `self.ts.prop[s]` which is the NBA component of the product state, is in `self.accept`), a second DFS (`cycle_check`) is initiated from `s`.
-3.  The second DFS searches for a path from `s` back to itself, using only states already visited by the first DFS but not yet by the current invocation of the second DFS.
-4.  If such a path (a cycle through an accepting state) is found, an accepting run exists.
+The `run` method along with two other methods implements the NDFS algorithm. It shares the same core idea with the NDFS algorithm on textbook. However, we implement both DFS in the recursive form, which is more concise and easier to understand than the stack form.
+
 
 ````rust
 // filepath: src/ndfs.rs
 
     // return whether there's a reachable cycle with an accepting state
     pub fn run(&mut self) -> bool {
-        for i_initial_prod_state in &*self.ts.initial {
-            if !self.outer_visited[*i_initial_prod_state] {
-                if self.reachable_cycle(*i_initial_prod_state) {
-                    return true; // Found an accepting cycle
-                }
-            }
-        }
-        false // No accepting cycle found
-    }
-
-    // Outer DFS
-    fn reachable_cycle(&mut self, s_prod_state: usize) -> bool {
-        self.outer_visited[s_prod_state] = true;
-        for t_next_prod_state in &self.ts.transition[s_prod_state] {
-            if !self.outer_visited[*t_next_prod_state] {
-                if self.reachable_cycle(*t_next_prod_state) {
-                    return true;
-                }
-            }
-        }
-        // Finished exploring from s_prod_state in outer DFS
-        // self.ts.prop[s_prod_state] gives the NBA state component q of the product state (s,q)
-        if self.accept.contains(&self.ts.prop[s_prod_state]) {
-            // s_prod_state is an accepting state in the product automaton
-            // Start inner DFS to find a cycle back to s_prod_state
-            self.inner_visited.fill(false); // Reset for this inner DFS call
-            if self.cycle_check(s_prod_state, s_prod_state) { // Search for s_prod_state from s_prod_state
-                return true;
-            }
-        }
-        false
-    }
-
-    // Inner DFS
-    fn cycle_check(&mut self, s_target_cycle_state: usize, v_current_inner_dfs: usize) -> bool {
-        self.inner_visited[v_current_inner_dfs] = true;   
-        for t_next_inner_dfs in &self.ts.transition[v_current_inner_dfs] {
-            if *t_next_inner_dfs == s_target_cycle_state { // Found cycle back to s
-                return true;
-            }
-            // Only explore unvisited states in this *inner* DFS
-            // All states considered here are already on the stack of the *outer* DFS (outer_visited is true)
-            if !self.inner_visited[*t_next_inner_dfs] {
-                if self.cycle_check(s_target_cycle_state, *t_next_inner_dfs) {
+        for i in &*self.ts.initial {
+            if !self.outer_visited[*i] {
+                if self.reachable_cycle(*i) {
                     return true;
                 }
             }
         }
         false
     }
+
+    // outrer DFS
+    fn reachable_cycle(&mut self, s: usize) -> bool {
+        self.outer_visited[s] = true;
+        for t in &self.ts.transition[s] {
+            if !self.outer_visited[*t] {
+                if self.reachable_cycle(*t) {
+                    return true;
+                }
+            }
+        }
+        // outer DFS finished for s
+        if self.accept.contains(&self.ts.prop[s]) {
+            // inner DFS
+            if self.cycle_check(s, s) {
+                return true;
+            }
+        }
+        false
+    }
+
+    // inner DFS
+    // all inner DFS share the same visited set
+    // this is a key trick to improve performance
+    fn cycle_check(&mut self, s: usize, v: usize) -> bool {
+        self.inner_visited[v] = true;   
+        for t in &self.ts.transition[v] {
+            if *t == s {
+                return true;
+            }
+            if !self.inner_visited[*t] {
+                if self.cycle_check(s, *t) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
 }
-
 ````
 
 ## 5. Parsing

@@ -4,7 +4,7 @@ use crate::ts::TS;
 // data structures for nested DFS
 pub struct NDFS<'a> {
     ts: &'a TS<usize>,
-    accept: &'a HashSet<usize>,
+    accept: &'a HashSet<usize>, // NBA accepting states
     outer_visited: Vec<bool>,
     inner_visited: Vec<bool>,
 }
@@ -32,6 +32,7 @@ impl<'a> NDFS<'a> {
         false
     }
 
+    // outrer DFS
     fn reachable_cycle(&mut self, s: usize) -> bool {
         self.outer_visited[s] = true;
         for t in &self.ts.transition[s] {
@@ -51,6 +52,9 @@ impl<'a> NDFS<'a> {
         false
     }
 
+    // inner DFS
+    // all inner DFS shares the same visited set
+    // this is a key trick to improve performance
     fn cycle_check(&mut self, s: usize, v: usize) -> bool {
         self.inner_visited[v] = true;   
         for t in &self.ts.transition[v] {
