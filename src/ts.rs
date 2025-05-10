@@ -13,7 +13,6 @@ pub struct TS<AP> {
 }
 
 // construct a product TS of a TS and an NBA 
-// with `atoms` as AP of the NBA and `init_set` as initial states of the TS
 pub fn ts_nba_prod<A: PartialEq>(ts: &TS<A>, nba: &NBA<A>) -> TS<usize> {
     let sn = ts.state_num;
     let qn = nba.state_num;

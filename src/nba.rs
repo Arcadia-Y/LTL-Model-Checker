@@ -13,7 +13,7 @@ pub struct GNBA<A> {
 }
 
 // Construct a GNBA from an LTL formula
-pub fn elem_sets_to_gnba(phi:&LTL, clos:&Vec<&LTL>, elem_sets: &Vec<ElemSet>) -> GNBA<HashSet<String>> {
+pub fn ltl_to_gnba(phi:&LTL, clos:&Vec<&LTL>, elem_sets: &Vec<ElemSet>) -> GNBA<HashSet<String>> {
     let state_num = elem_sets.len();
 
     let mut initial = vec!();
@@ -66,7 +66,6 @@ pub fn elem_sets_to_gnba(phi:&LTL, clos:&Vec<&LTL>, elem_sets: &Vec<ElemSet>) ->
 }
 
 // NBA with natural numbers as states and A as alphabet
-// specialized for LTL model checking
 #[derive(Debug)]
 pub struct NBA<A> {
     pub state_num: usize,
@@ -128,7 +127,7 @@ mod tests {
         println!("{:?}", closure);
         let elem_sets = get_elem_sets(&closure);
         println!("{:?}", elem_sets);
-        let gnba = elem_sets_to_gnba(&ltl, &closure, &elem_sets);
+        let gnba = ltl_to_gnba(&ltl, &closure, &elem_sets);
         println!("{:?}", gnba);
         let nba = gnba_to_nba(&gnba);
         println!("{:?}", nba);

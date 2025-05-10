@@ -8,7 +8,7 @@ impl TS<HashSet<String>> {
         let atoms = ltl.get_atoms();
         let closure = ltl.get_closure();
         let elem_sets = get_elem_sets(&closure);
-        let gnba = elem_sets_to_gnba(&ltl, &closure, &elem_sets);
+        let gnba = ltl_to_gnba(&ltl, &closure, &elem_sets);
         let nba = gnba_to_nba(&gnba);
         // construct a new TS with the scoped prop
         let ts_new = TS {
@@ -19,7 +19,7 @@ impl TS<HashSet<String>> {
         };
         let ts_nba = ts_nba_prod(&ts_new, &nba,);
         let mut ndfs = ndfs::NDFS::new(&ts_nba, &nba.accept);
-        ndfs.run()
+        !ndfs.run()
     }
 
     // check whether a state in a TS satisfies an LTL formula
@@ -28,7 +28,7 @@ impl TS<HashSet<String>> {
         let atoms = ltl.get_atoms();
         let closure = ltl.get_closure();
         let elem_sets = get_elem_sets(&closure);
-        let gnba = elem_sets_to_gnba(&ltl, &closure, &elem_sets);
+        let gnba = ltl_to_gnba(&ltl, &closure, &elem_sets);
         let nba = gnba_to_nba(&gnba);
         // construct a new TS with the scoped prop and s as the only initial state
         let ts_new = TS {
@@ -39,6 +39,6 @@ impl TS<HashSet<String>> {
         };
         let ts_nba = ts_nba_prod(&ts_new, &nba);
         let mut ndfs = ndfs::NDFS::new(&ts_nba, &nba.accept);
-        ndfs.run()
+        !ndfs.run()
     }
 }

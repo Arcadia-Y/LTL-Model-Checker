@@ -20,15 +20,16 @@ impl<'a> NDFS<'a> {
         }
     }
 
+    // return whether there's a reachable cycle with an accepting state
     pub fn run(&mut self) -> bool {
         for i in &*self.ts.initial {
             if !self.outer_visited[*i] {
                 if self.reachable_cycle(*i) {
-                    return false;
+                    return true;
                 }
             }
         }
-        true
+        false
     }
 
     fn reachable_cycle(&mut self, s: usize) -> bool {
