@@ -1,75 +1,32 @@
-use std::{collections::{HashMap, HashSet}, vec};
-
-use chumsky::prelude::*;
+use std::{collections::HashSet, vec};
 
 // LTL formulas with extended operators
 #[derive(Debug)]
-pub enum LTLE<'a> {
+pub enum LTLE {
     True,
-    Atom(&'a str),
-    Not(Box<LTLE<'a>>),
-    And(Box<LTLE<'a>>, Box<LTLE<'a>>),
-    Or(Box<LTLE<'a>>, Box<LTLE<'a>>),
-    Impl(Box<LTLE<'a>>, Box<LTLE<'a>>),
-    Next(Box<LTLE<'a>>),
-    Even(Box<LTLE<'a>>),
-    Always(Box<LTLE<'a>>),
-    Until(Box<LTLE<'a>>, Box<LTLE<'a>>),
-}
-
-pub fn ltl_parser<'a>() -> impl Parser<'a, &'a str, LTLE<'a>> {
-    recursive(|expr| {
-        let ident = regex("[a-z]+").padded();
-
-        let atom = (text::keyword("true").map(|_| LTLE::True))
-            .or(ident.map(|s| LTLE::Atom(s)))
-            .or(expr.delimited_by(just('('), just(')')))
-            .padded();  
-    
-        let op = |c| just(c).padded();
-        let op2 = |c1: char, c2: char| just(c1).then(just(c2)).padded();
-    
-        let unary = choice((
-            op('!').to(LTLE::Not as fn(_) -> _),
-            op('X').to(LTLE::Next as fn(_) -> _),
-            op('G').to(LTLE::Always as fn(_) -> _),
-            op('F').to(LTLE::Even as fn(_) -> _),
-        ))
-            .or_not()
-            .then(atom)
-            .map(|(lhs, rhs)| match lhs {
-                Some(op) => op(Box::new(rhs)),
-                None => rhs,
-            });
-    
-        let binary = unary.clone().foldl(
-            choice((
-                op2('/', '\\').to(LTLE::And as fn(_, _) -> _),
-                op2('\\', '/').to(LTLE::Or as fn(_, _) -> _),
-                op2('-', '>').to(LTLE::Impl as fn(_, _) -> _),
-                op('U').to(LTLE::Until as fn(_, _) -> _),
-            ))
-            .then(unary)
-            .repeated(),
-            |lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)),
-        );
-
-        binary
-    })
+    Atom(String),
+    Not(Box<LTLE>),
+    And(Box<LTLE>, Box<LTLE>),
+    Or(Box<LTLE>, Box<LTLE>),
+    Impl(Box<LTLE>, Box<LTLE>),
+    Next(Box<LTLE>),
+    Even(Box<LTLE>),
+    Always(Box<LTLE>),
+    Until(Box<LTLE>, Box<LTLE>),
 }
 
 // LTL formulas with only basic operators
 #[derive(Debug, PartialEq, Eq, Hash)]
-pub enum LTL<'a> {
+pub enum LTL {
     True,
-    Atom(&'a str),
-    Not(Box<LTL<'a>>),
-    And(Box<LTL<'a>>, Box<LTL<'a>>),
-    Next(Box<LTL<'a>>),
-    Until(Box<LTL<'a>>, Box<LTL<'a>>),
+    Atom(String),
+    Not(Box<LTL>),
+    And(Box<LTL>, Box<LTL>),
+    Next(Box<LTL>),
+    Until(Box<LTL>, Box<LTL>),
 }
 
-fn negate(x: LTL) -> LTL {
+pub fn negate(x: LTL) -> LTL {
     match x {
         LTL::Not(x) => *x,
         _ => LTL::Not(Box::new(x)),
@@ -104,7 +61,33 @@ pub fn reduce_ltl(x: LTLE) -> LTL {
     }
 }
 
-impl<'a> LTL<'a> {
+impl<'a> LTL {
+    // get the atoms of an LTL formula
+    pub fn get_atoms(&self) -> HashSet<String> {
+        let mut res = HashSet::new();
+        self.get_atoms_aux(&mut res);
+        res
+    }
+
+    fn get_atoms_aux(&self, set: &mut HashSet<String>) {
+        match self {
+            LTL::True => {}
+            LTL::Atom(s) => {
+                set.insert(s.clone());
+            }
+            LTL::Not(x) => x.get_atoms_aux(set),
+            LTL::And(x, y) => {
+                x.get_atoms_aux(set);
+                y.get_atoms_aux(set);
+            }
+            LTL::Next(x) => x.get_atoms_aux(set),
+            LTL::Until(x, y) => {
+                x.get_atoms_aux(set);
+                y.get_atoms_aux(set);
+            }
+        }
+    }
+
     // get the closure of an LTL formula
     // only subformulas that don't start with negation are included
     pub fn get_closure(&self) -> Vec<& LTL> {
@@ -114,14 +97,14 @@ impl<'a> LTL<'a> {
         res
     }
 
-    fn update_closure<'b>(&'a self, vec: &'b mut Vec<&'a LTL<'a>>, set: &'b mut HashSet<&'a LTL<'a>>) {
+    fn update_closure<'b>(&'a self, vec: &'b mut Vec<&'a LTL>, set: &'b mut HashSet<&'a LTL>) {
         if !set.contains(self) {
             vec.push(self);
             set.insert(self);
         }
     }
 
-    fn get_closure_aux<'b>(&'a self, vec: &'b mut Vec<&'a LTL<'a>>, set: &'b mut HashSet<&'a LTL<'a>>) {
+    fn get_closure_aux<'b>(&'a self, vec: &'b mut Vec<&'a LTL>, set: &'b mut HashSet<&'a LTL>) {
         match self {
             LTL::True | LTL::Atom(_) => {
                 self.update_closure(vec, set);
@@ -147,19 +130,31 @@ impl<'a> LTL<'a> {
 
 // An elementary set B of an LTL
 // atoms = B ∩ AP
-// set is a map from sub-formulas of the LTL formulas to their truth values in B
+// set is a map from positive sub-formulas of the LTL formulas to their truth values in B
 #[derive(Debug, Clone)]
 pub struct ElemSet<'a> {
-    atoms: HashSet<&'a str>,
-    set: HashMap<&'a LTL<'a>, bool>,
+    pub atoms: HashSet<String>,
+    pub set: HashSet<&'a LTL>,
+}
+
+impl<'a> ElemSet<'a> {
+    // check whether an elementary set contains an LTL formula
+    // it will handle the negation case
+    pub fn has(&self, x: &LTL) -> bool {
+        match x {
+            LTL::True => true,
+            LTL::Not(y) => !self.has(y),
+            _ => self.set.contains(x)
+        }
+    }
 }
 
 // get the elementary sets of a closure
-pub fn get_elem_sets<'a>(cl: &'a Vec<& LTL<'a>>) -> Vec<ElemSet<'a>> {
+pub fn get_elem_sets<'a>(cl: &'a Vec<&LTL>) -> Vec<ElemSet<'a>> {
     let mut res = vec!();
     let cur = ElemSet {
         atoms: HashSet::new(),
-        set: HashMap::new(),
+        set: HashSet::new(),
     };
     get_elem_sets_aux(cl, cur, &mut res);
     res
@@ -169,11 +164,11 @@ fn eval_truth_value(e: &ElemSet, x: &LTL) -> bool {
     match x {
         LTL::True => true,
         LTL::Not(x) => !eval_truth_value(e, x),
-        _ => *e.set.get(x).unwrap()
+        _ => e.set.contains(x)
     }
 }
 
-fn get_elem_sets_aux<'a>(cl: &'a [&LTL<'a>], mut cur: ElemSet<'a>, res: &mut Vec<ElemSet<'a>>) {
+fn get_elem_sets_aux<'a>(cl: &'a [&LTL], mut cur: ElemSet<'a>, res: &mut Vec<ElemSet<'a>>) {
     if cl.is_empty() {
         res.push(cur);
         return;
@@ -183,43 +178,47 @@ fn get_elem_sets_aux<'a>(cl: &'a [&LTL<'a>], mut cur: ElemSet<'a>, res: &mut Vec
         LTL::True => get_elem_sets_aux(&cl[1..], cur, res),
         LTL::Atom(s) => {
             let mut other = cur.clone();
-            cur.set.insert(x, false);
+            // x is false
             get_elem_sets_aux(&cl[1..], cur, res);
-            other.atoms.insert(s);
-            other.set.insert(x, true);
+            // x is true
+            other.atoms.insert(s.clone());
+            other.set.insert(x);
             get_elem_sets_aux(&cl[1..], other, res);
         }
         LTL::Not(_) => {
             get_elem_sets_aux(&cl[1..], cur, res);
         }
         LTL::And(a, b) => {
-            cur.set.insert(x, eval_truth_value(&cur, a) && eval_truth_value(&cur, b));
+            if eval_truth_value(&cur, a) && eval_truth_value(&cur, b) {
+                cur.set.insert(x);
+            }
             get_elem_sets_aux(&cl[1..], cur, res);
         }
-        LTL::Next(x) => {
+        LTL::Next(_) => {
             let mut other = cur.clone();
-            cur.set.insert(x, false);
+            // x is false
             get_elem_sets_aux(&cl[1..], cur, res);
-            other.set.insert(x, true);
+            // x is true
+            other.set.insert(x);
             get_elem_sets_aux(&cl[1..], other, res);
         }
         LTL::Until(a, b) => {
             if eval_truth_value(&cur, b) {
                 // b is true
-                cur.set.insert(x, true);
+                cur.set.insert(x);
                 get_elem_sets_aux(&cl[1..], cur, res);
             } else {
                 // b is false
                 if eval_truth_value(&cur, a) {
                     // a is true
                     let mut other = cur.clone();
-                    cur.set.insert(x, false);
+                    // x is false
                     get_elem_sets_aux(&cl[1..], cur, res);
-                    other.set.insert(x, true);
+                    // x is true
+                    other.set.insert(x);
                     get_elem_sets_aux(&cl[1..], other, res);
                 } else {
                     // a is false
-                    cur.set.insert(x, false);
                     get_elem_sets_aux(&cl[1..], cur, res);
                 }
             }
@@ -227,9 +226,35 @@ fn get_elem_sets_aux<'a>(cl: &'a [&LTL<'a>], mut cur: ElemSet<'a>, res: &mut Vec
     }
 }
 
+// Check if (x, y) satisfies one-step relation in the construction of the GNBA's transition relation
+pub fn step_relation(clos:&Vec<&LTL>, x: &ElemSet, y: &ElemSet) -> bool {
+    for a in clos {
+        match a {
+            LTL::Next(b) => {
+                let a_in_x = x.has(a);
+                let b_in_y = y.has(&**b);
+                if a_in_x && !b_in_y || !a_in_x && b_in_y {
+                    return false;
+                }
+            }
+            LTL::Until(a1, a2) => {
+                let lval = x.has(a);
+                let rval = x.has(&**a2) || (x.has(&**a1) && y.has(a));
+                if lval && !rval || !lval && rval {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
+    use chumsky::Parser;
     use super::*;
+    use crate::parser::ltl_parser;
 
     #[test]
     fn test_ltl() {
@@ -242,6 +267,6 @@ mod tests {
         let closure = ltl.get_closure();
         println!("{:?}", closure);
         let elem_sets = get_elem_sets(&closure);
-        println!("{:?}", elem_sets);
+        println!("{:?}", elem_sets.len());
     }
 }

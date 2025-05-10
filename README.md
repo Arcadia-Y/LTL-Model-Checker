@@ -1,4 +1,4 @@
-# LTL-Checker
+# LTL-Model-Checker
 
 This is a Linear Temporal Logic (LTL) model checker. More specifically, given a transition system (TS) and an LTL formula, it can check whether the TS (or an arbitrary state of the TS) satisfies the formula.
 
@@ -10,5 +10,5 @@ Our overall workflow is as follows: We first parse input to get the transition s
 - construct its elementary set
 - construct a GNBA for $\neg \varphi$
 - transform the GNBA into an NBA $\mathcal{A}$
-- construct $TS \otimes \mathcal{A}$
+- construct $TS \otimes \mathcal{A}$ within the scope of $\varphi$
 - run the nested DFS on $TS \otimes \mathcal{A}$ to check whether $TS \models \varphi$
