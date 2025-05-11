@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# For parsing LTL formulas
 chumsky = {version = "0.10", features = ["regex"]}
+# For parsing command line argument 
+clap = { version = "4.5.38", features = ["derive"] }

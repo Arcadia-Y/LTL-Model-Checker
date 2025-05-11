@@ -40,6 +40,8 @@ For a release build:
 cargo run --release -- <ts_file> <ltl_file>
 ```
 
+We also provide some optional arguments, run `[ltl-chcker] --help` for more details.
+
 ## Workflow Overview
 The model checking process follows these general steps for each LTL formula $\varphi$ to be checked against a transition system $TS$:
 

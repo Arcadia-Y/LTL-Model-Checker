@@ -7,17 +7,31 @@ pub struct NDFS<'a> {
     accept: &'a HashSet<usize>, // NBA accepting states
     outer_visited: Vec<bool>,
     inner_visited: Vec<bool>,
+    state_cnt: usize, // the number of states in the NBA
+    trace: Vec<usize>, // the trace of the counterexample
 }
 
 impl<'a> NDFS<'a> {
-    pub fn new(ts: &'a TS<usize>, accept: &'a HashSet<usize>) -> Self {
+    pub fn new(ts: &'a TS<usize>, accept: &'a HashSet<usize>, state_cnt: usize) -> Self {
         let state_num = ts.state_num;
         NDFS {
             ts,
             accept,
             inner_visited: vec![false; state_num],
             outer_visited: vec![false; state_num],
+            state_cnt,
+            trace: vec![],
         }
+    }
+
+    // return the trace of the counterexample
+    pub fn get_trace(&self) -> &Vec::<usize> {
+        &self.trace
+    }
+
+    // track down the trace for the counterexample
+    fn track(&mut self, s: usize) {
+        self.trace.push(s / self.state_cnt);
     }
 
     // return whether there's a reachable cycle with an accepting state
@@ -25,6 +39,7 @@ impl<'a> NDFS<'a> {
         for i in &*self.ts.initial {
             if !self.outer_visited[*i] {
                 if self.reachable_cycle(*i) {
+                    self.track(*i);
                     return true;
                 }
             }
@@ -38,6 +53,7 @@ impl<'a> NDFS<'a> {
         for t in &self.ts.transition[s] {
             if !self.outer_visited[*t] {
                 if self.reachable_cycle(*t) {
+                    self.track(*t);
                     return true;
                 }
             }
@@ -59,10 +75,12 @@ impl<'a> NDFS<'a> {
         self.inner_visited[v] = true;   
         for t in &self.ts.transition[v] {
             if *t == s {
+                self.track(*t);
                 return true;
             }
             if !self.inner_visited[*t] {
                 if self.cycle_check(s, *t) {
+                    self.track(*t);
                     return true;
                 }
             }

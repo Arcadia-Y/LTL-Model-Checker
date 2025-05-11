@@ -592,6 +592,8 @@ NDFS is an algorithm for detecting accepting cycles in a Büchi automaton (here,
 *   `accept`: The acceptance set of the NBA $\mathcal{A}$ (used to identify accepting states in the product).
 *   `outer_visited`: Marks states visited by the first (outer) DFS.
 *   `inner_visited`: Marks states visited by the second (inner) DFS.
+*   `state_cnt`: The number of states in the original NBA
+*   `trace`: The trace of the states in the original TS for the counterexample
 
 ````rust
 // filepath: src/ndfs.rs
@@ -602,16 +604,20 @@ pub struct NDFS<'a> {
     accept: &'a HashSet<usize>, // NBA accepting states
     outer_visited: Vec<bool>,
     inner_visited: Vec<bool>,
+    state_cnt: usize, // the number of states in the NBA
+    trace: Vec<usize>, // the trace of the counterexample
 }
 
 impl<'a> NDFS<'a> {
-    pub fn new(ts: &'a TS<usize>, accept: &'a HashSet<usize>) -> Self {
+    pub fn new(ts: &'a TS<usize>, accept: &'a HashSet<usize>, state_cnt: usize) -> Self {
         let state_num = ts.state_num;
         NDFS {
             ts,
             accept,
             inner_visited: vec![false; state_num],
             outer_visited: vec![false; state_num],
+            state_cnt,
+            trace: vec![],
         }
     }
 
@@ -620,16 +626,28 @@ impl<'a> NDFS<'a> {
 ### `run` and DFS methods: Cycle Detection
 
 The `run` method along with two other methods implements the NDFS algorithm. It shares the same core idea with the NDFS algorithm on textbook. However, we implement both DFS in the recursive form, which is more concise and easier to understand than the stack form.
+Besides, we track down the trace in the original TS if we successfully find a a reachable cycle with an accepting state
 
 
 ````rust
 // filepath: src/ndfs.rs
+
+    // return the trace of the counterexample
+    pub fn get_trace(&self) -> &Vec::<usize> {
+        &self.trace
+    }
+
+    // track down the trace for the counterexample
+    fn track(&mut self, s: usize) {
+        self.trace.push(s / self.state_cnt);
+    }
 
     // return whether there's a reachable cycle with an accepting state
     pub fn run(&mut self) -> bool {
         for i in &*self.ts.initial {
             if !self.outer_visited[*i] {
                 if self.reachable_cycle(*i) {
+                    self.track(*i);
                     return true;
                 }
             }
@@ -643,6 +661,7 @@ The `run` method along with two other methods implements the NDFS algorithm. It 
         for t in &self.ts.transition[s] {
             if !self.outer_visited[*t] {
                 if self.reachable_cycle(*t) {
+                    self.track(*t);
                     return true;
                 }
             }
@@ -658,16 +677,18 @@ The `run` method along with two other methods implements the NDFS algorithm. It 
     }
 
     // inner DFS
-    // all inner DFS share the same visited set
+    // all inner DFS shares the same visited set
     // this is a key trick to improve performance
     fn cycle_check(&mut self, s: usize, v: usize) -> bool {
         self.inner_visited[v] = true;   
         for t in &self.ts.transition[v] {
             if *t == s {
+                self.track(*t);
                 return true;
             }
             if !self.inner_visited[*t] {
                 if self.cycle_check(s, *t) {
+                    self.track(*t);
                     return true;
                 }
             }
@@ -864,7 +885,7 @@ The checker.rs file implements the core model checking algorithm.
 
 ### `check` and `check_state` methods
 
-These methods, implemented for `TS<HashSet<String>>`, orchestrate the model checking workflow:
+These methods, implemented for `Checker`, orchestrate the model checking workflow:
 1.  Negate the input LTL formula (`ltle`) and reduce it.
 2.  Get atoms, closure, and elementary sets for the negated formula.
 3.  Construct GNBA and then NBA for the negated formula.
@@ -875,48 +896,72 @@ These methods, implemented for `TS<HashSet<String>>`, orchestrate the model chec
 
 ````rust
 // filepath: src/checker.rs
-use crate::{ltl::*, nba::*, ndfs, ts::*};
-use std::{collections::HashSet, rc::Rc};
-
-impl TS<HashSet<String>> {
-    // check whether a TS satisfies an LTL formula
-    pub fn check(&self, ltle: LTLE) -> bool {
-        let ltl = negate(reduce_ltl(ltle)); // Check L |= not phi by checking L intersect L(not phi) = empty
-        let atoms = ltl.get_atoms();
-        let closure = ltl.get_closure();
-        let elem_sets = get_elem_sets(&closure);
-        let gnba = ltl_to_gnba(&ltl, &closure, &elem_sets);
-        let nba = gnba_to_nba(&gnba);
-        // construct a new TS with the scoped prop
-        let ts_new = TS {
-            state_num: self.state_num,
-            transition: self.transition.clone(),
-            initial: self.initial.clone(),
-            prop: self.prop.iter().map(|x| x.intersection(&atoms).cloned().collect()).collect(),
-        };
-        let ts_nba = ts_nba_prod(&ts_new, &nba,);
-        let mut ndfs = ndfs::NDFS::new(&ts_nba, &nba.accept);
-        !ndfs.run() // If ndfs.run() is true (cycle found for neg_formula), then formula is false.
-    }
-
-    // check whether a state in a TS satisfies an LTL formula
-    pub fn check_state(&self, s: usize, ltle: LTLE) -> bool {
+impl<'a> Checker<'a> {
+    // return the NBA of the negated ltl and its atoms
+    fn ltl_to_nba(&self, ltle: LTLE) -> (NBA<HashSet<String>>, HashSet<String>) {
         let ltl = negate(reduce_ltl(ltle));
         let atoms = ltl.get_atoms();
         let closure = ltl.get_closure();
         let elem_sets = get_elem_sets(&closure);
         let gnba = ltl_to_gnba(&ltl, &closure, &elem_sets);
+        if self.args.gnba {
+            println!("GNBA: {:?}", gnba);
+        }
         let nba = gnba_to_nba(&gnba);
-        // construct a new TS with the scoped prop and s as the only initial state
+        if self.args.nba {
+            println!("NBA: {:?}", nba);
+        }
+        (nba, atoms)
+    }
+
+    // check whether a TS satisfies an LTL formula
+    pub fn check(&self, ltle: LTLE) -> bool {
+        let (nba, atoms) = self.ltl_to_nba(ltle);
+        // construct a new TS with the scoped prop
         let ts_new = TS {
-            state_num: self.state_num,
-            transition: self.transition.clone(),
-            initial: Rc::new(vec![s]), // Only this state is initial
-            prop: self.prop.iter().map(|x| x.intersection(&atoms).cloned().collect()).collect(),
+            state_num: self.ts.state_num,
+            transition: self.ts.transition.clone(),
+            initial: self.ts.initial.clone(),
+            prop: self.ts.prop.iter().map(|x| x.intersection(&atoms).cloned().collect()).collect(),
         };
         let ts_nba = ts_nba_prod(&ts_new, &nba);
-        let mut ndfs = ndfs::NDFS::new(&ts_nba, &nba.accept);
-        !ndfs.run()
+        if self.args.prod {
+            println!("Product TS: {:?}", ts_nba);
+        }
+        let mut ndfs = ndfs::NDFS::new(&ts_nba, &nba.accept, nba.state_num);
+        let res = !ndfs.run();
+        if self.args.res {
+            println!("{}", res as u8);
+        }
+        if self.args.trace && !res {
+            self.show_trace(ndfs.get_trace());
+        }
+        res
+    }
+
+    // check whether a state in a TS satisfies an LTL formula
+    pub fn check_state(&self, s: usize, ltle: LTLE) -> bool {
+        let (nba, atoms) = self.ltl_to_nba(ltle);
+        // construct a new TS with the scoped prop and s as the only initial state
+        let ts_new = TS {
+            state_num: self.ts.state_num,
+            transition: self.ts.transition.clone(),
+            initial: Rc::new(vec![s]),
+            prop: self.ts.prop.iter().map(|x| x.intersection(&atoms).cloned().collect()).collect(),
+        };
+        let ts_nba = ts_nba_prod(&ts_new, &nba);
+        if self.args.prod {
+            println!("Product TS: {:?}", ts_nba);
+        }
+        let mut ndfs = ndfs::NDFS::new(&ts_nba, &nba.accept, nba.state_num);
+        let res = !ndfs.run();
+        if self.args.res {
+            println!("{}", res as u8);
+        }
+        if self.args.trace && !res {
+            self.show_trace(ndfs.get_trace());
+        }
+        res
     }
 }
 ````
